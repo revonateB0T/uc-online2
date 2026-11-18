@@ -59,6 +59,14 @@ A log is written to `/tmp/uc_online2.log`.
   Linux SDK exactly (nothing the real SDK exports is missing).
 - The AppId spoof, the DLC store, the ticket emulation, the local cloud
   (`LocalSaves`), the local inventory and the settings/ini handling.
+- The Workshop/UGC emulation for `ogAppId`: the four `ISteamUGC` methods a
+  game uses to discover installed mods (`GetNumSubscribedItems`,
+  `GetSubscribedItems`, `GetItemState`, `GetItemInstallInfo`) are answered
+  from `<steam library>/steamapps/workshop/content/<ogAppId>/`, with the
+  metadata taken from `appworkshop_<ogAppId>.acf`. The library is found from
+  the game's own directory (`.../steamapps/common/<Game>`), from `$SteamPath`,
+  from the Steam installation `steamclient.so` was loaded from, or from the
+  usual Linux Steam locations — whichever actually holds the content.
 - The vtable hooks that implement the spoof. On Linux there is no MinHook:
   the hook shim patches the interface **vtable slots** in place, which is
   what the Steamworks C++ interfaces dispatch through anyway.

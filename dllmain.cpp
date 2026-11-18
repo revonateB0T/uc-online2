@@ -28,6 +28,7 @@ void InstallEarlyAppIdHook(ISteamUtils* pUtils);
 
 #include "include/api/inventory_emu.h"
 #include "include/api/remote_storage_emu.h"
+#include "include/api/ugc_workshop_emu.h"
 #include "include/api/api_callbacks.h"
 #include "include/api/api_client.h"
 #include "include/api/api_interfaces.h"
@@ -685,6 +686,9 @@ void UcoOnLibraryReady()
 	UCOLOG("[UCOnline2] DLC store: UnlockAll=%d, %d entr%s",
 		UcoDlcStore::UnlockAll() ? 1 : 0, UcoDlcStore::Count(),
 		UcoDlcStore::Count() == 1 ? "y" : "ies");
+
+	if (g_OriginalAppId != 0 && g_OriginalAppId != g_ForcedAppId)
+		UcoWorkshopEmu::Init(g_OriginalAppId);
 
 	const bool passthroughTicket = loader.GetPassthroughTicketEnabled();
 	const bool emulateTicket = loader.GetEmulateTicketEnabled();
@@ -2396,6 +2400,12 @@ void InstallSteamSpoofHooks()
             installed, (int)(sizeof(hooks) / sizeof(hooks[0])),
             UcoDlcStore::UnlockAll() ? 1 : 0, UcoDlcStore::Count());
     }
+
+    // ISteamUGC Workshop hooks: when ogAppId is active and workshop items
+    // are found on disk, hook the subscription/install query methods so the
+    // game discovers them. Indices are for STEAMUGC_INTERFACE_VERSION021.
+    if (UcoWorkshopEmu::Enabled() && g_ClientCtx.SteamUGC())
+        UcoInstallWorkshopHooks(g_ClientCtx.SteamUGC());
 
     // ISteamUser auth hooks are installed per-interface, not here -- see
     // UcoInstallUserAuthHooks. The game frequently uses a DIFFERENT interface

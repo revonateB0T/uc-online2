@@ -676,6 +676,9 @@ inline BOOL VirtualProtect(void* addr, size_t size, DWORD newProtect, DWORD* old
 #ifndef _strnicmp
 #define _strnicmp strncasecmp
 #endif
+#ifndef _strtoui64
+#define _strtoui64 strtoull
+#endif
 
 #ifndef _vsnprintf_s
 #define _vsnprintf_s(buf, size, count, fmt, args) vsnprintf(buf, size, fmt, args)
@@ -756,6 +759,17 @@ inline int fscanf_s(FILE* f, const char* fmt, ...)
     va_list args;
     va_start(args, fmt);
     int n = vfscanf(f, fmt, args);
+    va_end(args);
+    return n;
+}
+#endif
+
+#ifndef sscanf_s
+inline int sscanf_s(const char* s, const char* fmt, ...)
+{
+    va_list args;
+    va_start(args, fmt);
+    int n = vsscanf(s, fmt, args);
     va_end(args);
     return n;
 }
