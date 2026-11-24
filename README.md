@@ -651,6 +651,67 @@ list works. If it refuses, it checks the AppId, and there is nothing left to
 try. Note that ownership alone is not enough for a ticket: the app has to be
 installed as well.
 
+### mod.io: supplying your own credentials
+
+Space Engineers is the case where this comes up most often, so here is what
+actually happens on the wire. The mod.io integration is `Bin64/VRage.Mod.Io.dll`
+(a .NET assembly); the game hard-codes the mod.io game id and API key in its own
+executable:
+
+```csharp
+MyModIoService.Create(..., "spaceengineers", "264",
+                      "1fb4489996a5e8ffc6ec1135f9985b5b", "331",
+                      "f2b64abe55452252b030c48adc0c1f0e", ...)
+```
+
+so every request goes to `https://g-264.modapi.io/v1/…` (the old `api.mod.io`
+is deprecated — it answers *"we are using the deprecated api.mod.io domain"*).
+The authentication is one POST:
+
+```
+POST https://g-264.modapi.io/v1/external/steamauth?api_key=1fb4489996a5e8ffc6ec1135f9985b5b
+Content-Type: application/x-www-form-urlencoded
+
+appdata=<base64 of the Steam encrypted app ticket>&date_expires=<unix ts>
+```
+
+mod.io decrypts `appdata` with the ticket key it has configured for game 264
+and checks Valve's signature. A ticket minted for another app — or a locally
+forged one — is refused. Measured against the live API:
+
+```json
+{"error":{"code":401,"error_ref":11018,"message":"We experienced a server error …"}}
+```
+
+`11018` is "invalid Steam encrypted app ticket". The game then has no access
+token, no `GET /v1/users/me` succeeds, and the in-game mod browser stays empty.
+
+**The game has a second way in.** `VRage.Mod.Io.dll` also implements mod.io's
+own email flow (`oauth/emailrequest` → `oauth/emailexchange`) and the game
+ships the UI for it — the localized string `ModIO_EnterCode` reads *"输入收件箱
+中收到的安全号码"* ("enter the security number you received in your inbox"), and
+the consent screen says *"将为您创建一个 mod.io 帐户"* ("a mod.io account will be
+created for you"). Signing in with an email address therefore does **not** need
+a Steam ticket at all, and is the clean way to get a mod.io session for a game
+you do not own. Try that first.
+
+**If the email path is not what you want**, `tools/modio_proxy.py` sits in front
+of `g-264.modapi.io` only, forwards everything untouched, and replaces the
+answer of the external-auth endpoints with a token you already have:
+
+```sh
+python3 tools/modio_proxy.py init            # CA + server certificate
+python3 tools/modio_proxy.py cert install    # trust the CA (Proton prefix + system store)
+python3 tools/modio_proxy.py hosts add       # 127.0.0.1 g-264.modapi.io
+printf '{"access_token":"…"}' > ~/.uc-online2-modio/token.json
+python3 tools/modio_proxy.py serve           # needs root for port 443
+```
+
+The token is the one mod.io hands out when you sign in on the mod.io website —
+a real token for game 264, valid for the scope mod.io gave it. The proxy cannot
+make mod.io accept a foreign ticket; it only stops the game from being told
+that the ticket failed.
+
 ---
 
 ## Building
