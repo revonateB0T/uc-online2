@@ -447,51 +447,109 @@ static Fn_GetNumSubscribedItems  g_pfnOriginalGetNumSubscribedItems  = nullptr;
 static Fn_GetSubscribedItems     g_pfnOriginalGetSubscribedItems     = nullptr;
 static Fn_GetItemState           g_pfnOriginalGetItemState           = nullptr;
 static Fn_GetItemInstallInfo     g_pfnOriginalGetItemInstallInfo     = nullptr;
-static bool                      g_bUgcLoggedFirst                   = false;
+
+// Call counters, so the log shows how often the game actually asks.
+static uint32 g_nCallsGetNumSubscribedItems = 0;
+static uint32 g_nCallsGetSubscribedItems    = 0;
+static uint32 g_nCallsGetItemState          = 0;
+static uint32 g_nCallsGetItemInstallInfo    = 0;
+
+// Render a list of published file IDs for the log.
+static void UcoFormatIdList(char* buf, size_t bufSize, const uint64* ids, uint32 count)
+{
+    if (!buf || bufSize == 0) return;
+    buf[0] = '\0';
+
+    size_t used = 0;
+    for (uint32 i = 0; i < count && i < 16; ++i)
+    {
+        const int n = _snprintf_s(buf + used, bufSize - used, _TRUNCATE, "%s%llu",
+            (i ? " " : ""), (unsigned long long)ids[i]);
+        if (n < 0 || (size_t)n >= bufSize - used) { buf[used] = '\0'; return; }
+        used += (size_t)n;
+    }
+    if (count > 16)
+        _snprintf_s(buf + used, bufSize - used, _TRUNCATE, " ...");
+}
 
 static uint32 S_CALLTYPE Hooked_GetNumSubscribedItems(void* pThis, bool bIncludeLocallyDisabled)
 {
-    uint32 emuCount = UcoWorkshopEmu::GetNumSubscribedItems();
+    const uint32 call = ++g_nCallsGetNumSubscribedItems;
+    const uint32 emuCount = UcoWorkshopEmu::GetNumSubscribedItems();
 
     if (emuCount > 0)
     {
-        if (!g_bUgcLoggedFirst)
-        {
-            UCOLOG("[UCOnline2] GetNumSubscribedItems hook: returning %u items from disk (ogAppId workshop)", emuCount);
-            g_bUgcLoggedFirst = true;
-        }
+        UCOLOG("[UCOnline2] ISteamUGC::GetNumSubscribedItems(call#%u, includeLocallyDisabled=%d) -> %u item(s) [emulated from disk]",
+            call, bIncludeLocallyDisabled ? 1 : 0, emuCount);
         return emuCount;
     }
 
     // Fall through to real Steam if we have no local items
-    return g_pfnOriginalGetNumSubscribedItems(pThis, bIncludeLocallyDisabled);
+    const uint32 real = g_pfnOriginalGetNumSubscribedItems(pThis, bIncludeLocallyDisabled);
+    UCOLOG("[UCOnline2] ISteamUGC::GetNumSubscribedItems(call#%u, includeLocallyDisabled=%d) -> %u item(s) [passthrough to Steam]",
+        call, bIncludeLocallyDisabled ? 1 : 0, real);
+    return real;
 }
 
 static uint32 S_CALLTYPE Hooked_GetSubscribedItems(void* pThis, uint64* pvecPublishedFileID, uint32 cMaxEntries, bool bIncludeLocallyDisabled)
 {
-    uint32 emuCount = UcoWorkshopEmu::GetNumSubscribedItems();
+    const uint32 call = ++g_nCallsGetSubscribedItems;
+    const uint32 emuCount = UcoWorkshopEmu::GetNumSubscribedItems();
 
     if (emuCount > 0)
-        return UcoWorkshopEmu::GetSubscribedItems(pvecPublishedFileID, cMaxEntries);
+    {
+        const uint32 count = UcoWorkshopEmu::GetSubscribedItems(pvecPublishedFileID, cMaxEntries);
+        char ids[512] = { 0 };
+        UcoFormatIdList(ids, sizeof(ids), pvecPublishedFileID, count);
+        UCOLOG("[UCOnline2] ISteamUGC::GetSubscribedItems(call#%u, max=%u, includeLocallyDisabled=%d) -> %u item(s) [%s] [emulated from disk]",
+            call, cMaxEntries, bIncludeLocallyDisabled ? 1 : 0, count, ids);
+        return count;
+    }
 
-    return g_pfnOriginalGetSubscribedItems(pThis, pvecPublishedFileID, cMaxEntries, bIncludeLocallyDisabled);
+    const uint32 real = g_pfnOriginalGetSubscribedItems(pThis, pvecPublishedFileID, cMaxEntries, bIncludeLocallyDisabled);
+    UCOLOG("[UCOnline2] ISteamUGC::GetSubscribedItems(call#%u, max=%u, includeLocallyDisabled=%d) -> %u item(s) [passthrough to Steam]",
+        call, cMaxEntries, bIncludeLocallyDisabled ? 1 : 0, real);
+    return real;
 }
 
 static uint32 S_CALLTYPE Hooked_GetItemState(void* pThis, uint64 nPublishedFileID)
 {
-    uint32 state = UcoWorkshopEmu::GetItemState(nPublishedFileID);
+    const uint32 call = ++g_nCallsGetItemState;
+    const uint32 state = UcoWorkshopEmu::GetItemState(nPublishedFileID);
     if (state != 0)
+    {
+        UCOLOG("[UCOnline2] ISteamUGC::GetItemState(call#%u, id=%llu) -> state=%u (subscribed|installed) [emulated from disk]",
+            call, (unsigned long long)nPublishedFileID, state);
         return state;
+    }
 
-    return g_pfnOriginalGetItemState(pThis, nPublishedFileID);
+    const uint32 real = g_pfnOriginalGetItemState(pThis, nPublishedFileID);
+    UCOLOG("[UCOnline2] ISteamUGC::GetItemState(call#%u, id=%llu) -> state=%u [passthrough to Steam]",
+        call, (unsigned long long)nPublishedFileID, real);
+    return real;
 }
 
 static bool S_CALLTYPE Hooked_GetItemInstallInfo(void* pThis, uint64 nPublishedFileID, uint64* punSizeOnDisk, char* pchFolder, uint32 cchFolderSize, uint32* punTimeStamp)
 {
-    if (UcoWorkshopEmu::GetItemInstallInfo(nPublishedFileID, punSizeOnDisk, pchFolder, cchFolderSize, punTimeStamp))
-        return true;
+    const uint32 call = ++g_nCallsGetItemInstallInfo;
 
-    return g_pfnOriginalGetItemInstallInfo(pThis, nPublishedFileID, punSizeOnDisk, pchFolder, cchFolderSize, punTimeStamp);
+    if (UcoWorkshopEmu::GetItemInstallInfo(nPublishedFileID, punSizeOnDisk, pchFolder, cchFolderSize, punTimeStamp))
+    {
+        UCOLOG("[UCOnline2] ISteamUGC::GetItemInstallInfo(call#%u, id=%llu) -> true, size=%llu, time=%u, folder='%s' [emulated from disk]",
+            call, (unsigned long long)nPublishedFileID,
+            punSizeOnDisk ? (unsigned long long)*punSizeOnDisk : 0ULL,
+            punTimeStamp ? *punTimeStamp : 0,
+            pchFolder ? pchFolder : "");
+        return true;
+    }
+
+    const bool real = g_pfnOriginalGetItemInstallInfo(pThis, nPublishedFileID, punSizeOnDisk, pchFolder, cchFolderSize, punTimeStamp);
+    UCOLOG("[UCOnline2] ISteamUGC::GetItemInstallInfo(call#%u, id=%llu) -> %s, size=%llu, time=%u, folder='%s' [passthrough to Steam]",
+        call, (unsigned long long)nPublishedFileID, real ? "true" : "false",
+        punSizeOnDisk ? (unsigned long long)*punSizeOnDisk : 0ULL,
+        punTimeStamp ? *punTimeStamp : 0,
+        pchFolder ? pchFolder : "");
+    return real;
 }
 
 // Call this from InstallSteamSpoofHooks() to install the UGC hooks.
@@ -532,4 +590,20 @@ static void UcoInstallWorkshopHooks(ISteamUGC* pUGC)
     UCOLOG("[UCOnline2] ISteamUGC Workshop hooks: %d/%d installed (%d items on disk)",
         installed, (int)(sizeof(hooks) / sizeof(hooks[0])),
         UcoWorkshopEmu::GetNumSubscribedItems());
+
+    // Log the emulated item table, so the log shows what the game is going
+    // to be told about. Capped: a big library can hold thousands of items.
+    const std::vector<UcoWorkshopItem>& items = UcoWorkshopEmu::s_Items;
+    const size_t kMaxLogged = 64;
+    for (size_t i = 0; i < items.size() && i < kMaxLogged; ++i)
+    {
+        UCOLOG("[UCOnline2] ISteamUGC Workshop item: id=%llu, size=%llu, time=%u, folder='%s'",
+            (unsigned long long)items[i].id,
+            (unsigned long long)items[i].sizeOnDisk,
+            items[i].timeUpdated,
+            items[i].folder);
+    }
+    if (items.size() > kMaxLogged)
+        UCOLOG("[UCOnline2] ISteamUGC Workshop item: ... and %u more item(s) not listed",
+            (uint32)(items.size() - kMaxLogged));
 }
