@@ -191,6 +191,8 @@ S_API bool S_CALLTYPE SteamAPI_ManualDispatch_GetAPICallResult(HSteamPipe hPipe,
 {
 	if (UcoInvEmu::IsOurCall(hCall))
 		return UcoInvEmu::GetAPICallResult(hCall, pBuf, cubBuf, iExpected, pbFailed);
+	if (UcoUGCQueryEmu::IsOurCall(hCall))
+		return UcoUGCQueryEmu::GetAPICallResult(hCall, pBuf, cubBuf, iExpected, pbFailed);
 	if (g_DispatchMode == 3)
 		SteamAPI_ManualDispatch_Init();
 

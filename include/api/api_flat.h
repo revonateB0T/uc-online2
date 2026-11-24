@@ -1517,6 +1517,8 @@ S_API bool S_CALLTYPE SteamAPI_ISteamUtils_GetAPICallResult(intptr_t instancePtr
 {
 	if (UcoInvEmu::IsOurCall(hSteamAPICall))
 		return UcoInvEmu::GetAPICallResult(hSteamAPICall, pCallback, cubCallback, iCallbackExpected, pbFailed);
+	if (UcoUGCQueryEmu::IsOurCall(hSteamAPICall))
+		return UcoUGCQueryEmu::GetAPICallResult(hSteamAPICall, pCallback, cubCallback, iCallbackExpected, pbFailed);
 	if (UcoCloudEmu::IsOurCall(hSteamAPICall))
 		return UcoCloudEmu::GetAPICallResult(hSteamAPICall, pCallback, cubCallback, iCallbackExpected, pbFailed);
 	if (g_bServerReady == true)
