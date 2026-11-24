@@ -29,7 +29,6 @@ void InstallEarlyAppIdHook(ISteamUtils* pUtils);
 #include "include/api/inventory_emu.h"
 #include "include/api/remote_storage_emu.h"
 #include "include/api/ugc_workshop_emu.h"
-#include "include/api/ugc_query_emu.h"
 #include "include/api/api_callbacks.h"
 #include "include/api/api_client.h"
 #include "include/api/api_interfaces.h"
@@ -929,8 +928,6 @@ void CCallbackDispatcher::ExecuteCallResult(HSteamPipe hPipe, SteamAPICall_t hCa
 	bool bResult;
 	if (UcoInvEmu::IsOurCall(hCall))
 		bResult = UcoInvEmu::GetAPICallResult(hCall, pBuffer, pCb->GetCallbackSizeBytes(), pCb->GetICallback(), &bFailed);
-	else if (UcoUGCQueryEmu::IsOurCall(hCall))
-		bResult = UcoUGCQueryEmu::GetAPICallResult(hCall, pBuffer, pCb->GetCallbackSizeBytes(), pCb->GetICallback(), &bFailed);
 	else if (UcoCloudEmu::IsOurCall(hCall))
 		bResult = UcoCloudEmu::GetAPICallResult(hCall, pBuffer, pCb->GetCallbackSizeBytes(), pCb->GetICallback(), &bFailed);
 	else
@@ -1314,12 +1311,6 @@ void CCallbackDispatcher::AddCallResult(CCallbackBase* pCb, SteamAPICall_t hCall
 		UCOColor(FOREGROUND_RED | FOREGROUND_INTENSITY, "[UCOnline2] AddCallResult: already registered\r\n");
 		existing->second = pCb;
 	}
-
-	// A call of ours (the local answer to the workshop query) is ready
-	// already, so hand the completion over now -- with the callback id and
-	// the result size of the *game*, not of our SDK header.
-	if (UcoUGCQueryEmu::IsOurCall(hCall))
-		UcoUGCQueryEmu::PostCompletion(hCall, pCb->GetICallback(), pCb->GetCallbackSizeBytes());
 }
 
 void CCallbackDispatcher::Remove(CCallbackBase* pCb)
@@ -2460,12 +2451,6 @@ void InstallSteamSpoofHooks()
     // game discovers them. Indices are for STEAMUGC_INTERFACE_VERSION021.
     if (UcoWorkshopEmu::Enabled() && g_ClientCtx.SteamUGC())
         UcoInstallWorkshopHooks(g_ClientCtx.SteamUGC());
-
-    // The workshop query is answered locally, so the game can never end up
-    // waiting for an answer that does not come.  Installed unconditionally:
-    // a hang is worse than an empty workshop.
-    if (g_ClientCtx.SteamUGC())
-        UcoInstallUGCQueryHooks(g_ClientCtx.SteamUGC(), g_ClientCtx.SteamUtils());
 
     // ISteamUser auth hooks are installed per-interface, not here -- see
     // UcoInstallUserAuthHooks. The game frequently uses a DIFFERENT interface
