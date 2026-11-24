@@ -2199,12 +2199,20 @@ static bool S_CALLTYPE Hooked_RS_IsCloudEnabled(void*)
 // for Spacewar, outside this game and permanently.
 static void S_CALLTYPE Hooked_RS_SetCloudEnabledForApp(void*, bool) {}
 
+// The RemoteStorage route to "which Workshop items am I subscribed to?".
+// Real Steam answers for the spoofed AppId (480/Spacewar) and returns an
+// empty list, so the game never finds its mods. The emulated item table
+// answers instead -- see UcoWorkshopEmu::EnumerateUserSubscribedFiles.
+static SteamAPICall_t S_CALLTYPE Hooked_RS_EnumerateUserSubscribedFiles(void*, uint32 unStartIndex)
+{ return UcoWorkshopEmu::EnumerateUserSubscribedFiles(unStartIndex); }
+
 struct UcoRemoteStorageLayout
 {
     int write, read, writeAsync, readAsync, readAsyncDone;
     int forget, del, setSync, streamOpen, streamChunk, streamClose, streamCancel;
     int exists, persisted, size, timestamp, getSync, count, nameAndSize;
     int quota, cloudAccount, cloudApp, setCloudApp;
+    int enumerateSubscribed;
 };
 
 static bool UcoRemoteStorageLayoutFor(const char* ver, UcoRemoteStorageLayout& out)
@@ -2216,15 +2224,21 @@ static bool UcoRemoteStorageLayoutFor(const char* ver, UcoRemoteStorageLayout& o
     const int n = atoi(ver + kPrefixLen);
     if (n >= 13)
     {
+        // 013 added the async trio (FileWriteAsync / FileReadAsync /
+        // FileReadAsyncComplete). EnumerateUserSubscribedFiles sits at slot
+        // 43 of the 013+ layout -- counted from the virtual declarations in
+        // include/sdk/isteamremotestorage.h, where it is the 44th virtual.
+        // (42 is SubscribePublishedFile -- hooking the wrong slot there
+        // breaks subscribing and crashes the game.)
         out = { 0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12,
-                13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23 };
+                13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 43 };
         return true;
     }
     if (n >= 10)
     {
         // No async trio; everything after FileRead sits three slots higher.
         out = { 0, 1, -1, -1, -1, 2, 3, 5, 6, 7, 8, 9,
-                10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20 };
+                10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 40 };
         return true;
     }
     return false;   // 009 and older: layouts not verified, so do not touch them
@@ -2232,7 +2246,19 @@ static bool UcoRemoteStorageLayoutFor(const char* ver, UcoRemoteStorageLayout& o
 
 void UcoInstallRemoteStorageHooks(void* pIface, const char* ver)
 {
-    if (!UcoCloudEmu::Enabled() || !pIface || !ver)
+    if (!pIface || !ver)
+        return;
+
+    // Two independent reasons to touch this interface:
+    //
+    //   LocalSaves  -- the save API is served from the local folder
+    //   ogAppId     -- EnumerateUserSubscribedFiles is answered from the
+    //                  emulated Workshop table
+    //
+    // Either one alone is enough to install the matching hooks.
+    const bool wantCloud    = UcoCloudEmu::Enabled();
+    const bool wantWorkshop = UcoWorkshopEmu::Enabled();
+    if (!wantCloud && !wantWorkshop)
         return;
 
 #if defined(_M_IX86)
@@ -2269,10 +2295,11 @@ void UcoInstallRemoteStorageHooks(void* pIface, const char* ver)
 
     // Pull any existing save out of the spoofed app's cloud bucket FIRST --
     // after the hooks are on, this interface just reads the local store back.
-    UcoCloudEmu::ImportFromSteam(pIface,
-        (UcoCloudEmu::PfnGetFileCount)vt[L.count],
-        (UcoCloudEmu::PfnGetFileNameAndSize)vt[L.nameAndSize],
-        (UcoCloudEmu::PfnFileRead)vt[L.read]);
+    if (wantCloud)
+        UcoCloudEmu::ImportFromSteam(pIface,
+            (UcoCloudEmu::PfnGetFileCount)vt[L.count],
+            (UcoCloudEmu::PfnGetFileNameAndSize)vt[L.nameAndSize],
+            (UcoCloudEmu::PfnFileRead)vt[L.read]);
 
     struct Item { int index; void* detour; const char* name; };
     const Item items[] = {
@@ -2302,22 +2329,40 @@ void UcoInstallRemoteStorageHooks(void* pIface, const char* ver)
     };
 
     int ok = 0, applicable = 0;
-    for (const Item& it : items)
+    if (wantCloud)
     {
-        if (it.index < 0)                          // method absent in this version
-            continue;
-        ++applicable;
-        void* dummyOriginal = nullptr;             // detours never call through
-        const PlatHookStatus st = PlatHookVTableMethod(vt, it.index, it.detour, &dummyOriginal);
-        if (st == PLAT_HOOK_OK || st == PLAT_HOOK_ALREADY)
-            ++ok;
-        else
-            UCOLOG("[UCOnline2] %s: failed to hook %s (vtable[%d]): %d",
-                ver, it.name, it.index, (int)st);
+        for (const Item& it : items)
+        {
+            if (it.index < 0)                      // method absent in this version
+                continue;
+            ++applicable;
+            void* dummyOriginal = nullptr;         // detours never call through
+            const PlatHookStatus st = PlatHookVTableMethod(vt, it.index, it.detour, &dummyOriginal);
+            if (st == PLAT_HOOK_OK || st == PLAT_HOOK_ALREADY)
+                ++ok;
+            else
+                UCOLOG("[UCOnline2] %s: failed to hook %s (vtable[%d]): %d",
+                    ver, it.name, it.index, (int)st);
+        }
+
+        UCOLOG("[UCOnline2] LocalSaves: %d/%d RemoteStorage hooks installed on %s",
+            ok, applicable, ver);
     }
 
-    UCOLOG("[UCOnline2] LocalSaves: %d/%d RemoteStorage hooks installed on %s",
-        ok, applicable, ver);
+    // The Workshop enumeration is hooked independently of LocalSaves: it is
+    // answered from the emulated item table, not from the local save folder.
+    if (wantWorkshop && L.enumerateSubscribed >= 0)
+    {
+        void* dummyOriginal = nullptr;
+        const PlatHookStatus st = PlatHookVTableMethod(vt, L.enumerateSubscribed,
+            (void*)&Hooked_RS_EnumerateUserSubscribedFiles, &dummyOriginal);
+        if (st == PLAT_HOOK_OK || st == PLAT_HOOK_ALREADY)
+            UCOLOG("[UCOnline2] %s: hooked EnumerateUserSubscribedFiles (vtable[%d] of %p)",
+                ver, L.enumerateSubscribed, (void*)vt);
+        else
+            UCOLOG("[UCOnline2] %s: failed to hook EnumerateUserSubscribedFiles (vtable[%d]): %d",
+                ver, L.enumerateSubscribed, (int)st);
+    }
 #endif
 }
 
@@ -2417,7 +2462,10 @@ void InstallSteamSpoofHooks()
     // Same story for ISteamRemoteStorage: a game may take a different version
     // than ours (hooked in the interface factory), but it may equally use the
     // one we hold, so cover that object too. Installing twice is a no-op.
-    if (UcoCloudEmu::Enabled() && g_ClientCtx.SteamRemoteStorage())
+    // LocalSaves serves the save API; ogAppId serves the Workshop
+    // enumeration -- either one alone is enough.
+    if ((UcoCloudEmu::Enabled() || UcoWorkshopEmu::Enabled())
+        && g_ClientCtx.SteamRemoteStorage())
         UcoInstallRemoteStorageHooks(g_ClientCtx.SteamRemoteStorage(),
             STEAMREMOTESTORAGE_INTERFACE_VERSION);
 }

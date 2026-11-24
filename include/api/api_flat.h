@@ -483,7 +483,14 @@ S_API ISteamRemoteStorage* S_CALLTYPE SteamAPI_ISteamClient_GetISteamRemoteStora
 	}
 	if (g_bClientReady == false)
 		__debugbreak();
-	return (ISteamRemoteStorage*)UCO_FlatIfaceGuard(g_ClientCtx.SteamClient()->GetISteamRemoteStorage(hSteamuser, hSteamPipe, pchVersion), "GetISteamRemoteStorage", pchVersion);
+	ISteamRemoteStorage* rs = (ISteamRemoteStorage*)
+		g_ClientCtx.SteamClient()->GetISteamRemoteStorage(hSteamuser, hSteamPipe, pchVersion);
+	// The game may take a different RemoteStorage version than ours, and each
+	// version is a separate object with its own vtable -- so hook the object
+	// actually being handed out (same as the interface factory does).
+	if (rs)
+		UcoInstallRemoteStorageHooks(rs, pchVersion);
+	return (ISteamRemoteStorage*)UCO_FlatIfaceGuard(rs, "GetISteamRemoteStorage", pchVersion);
 }
 S_API ISteamScreenshots* S_CALLTYPE SteamAPI_ISteamClient_GetISteamScreenshots(intptr_t instancePtr, HSteamUser hSteamuser, HSteamPipe hSteamPipe, const char * pchVersion)
 {
@@ -2565,6 +2572,11 @@ S_API SteamAPICall_t S_CALLTYPE SteamAPI_ISteamRemoteStorage_EnumerateUserSubscr
 {
 	if (g_bClientReady == false)
 		__debugbreak();
+	// Answered from the emulated Workshop table when there is one: real
+	// Steam answers for the spoofed AppId (480/Spacewar) and returns an
+	// empty list, so the game never finds its mods.
+	if (UcoWorkshopEmu::Enabled())
+		return UcoWorkshopEmu::EnumerateUserSubscribedFiles(unStartIndex);
 	return g_ClientCtx.SteamRemoteStorage()->EnumerateUserSubscribedFiles(unStartIndex);
 }
 S_API SteamAPICall_t S_CALLTYPE SteamAPI_ISteamRemoteStorage_UnsubscribePublishedFile(intptr_t instancePtr, PublishedFileId_t unPublishedFileId)

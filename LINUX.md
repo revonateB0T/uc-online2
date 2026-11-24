@@ -67,6 +67,14 @@ A log is written to `/tmp/uc_online2.log`.
   the game's own directory (`.../steamapps/common/<Game>`), from `$SteamPath`,
   from the Steam installation `steamclient.so` was loaded from, or from the
   usual Linux Steam locations — whichever actually holds the content.
+- The same list is also served through the **RemoteStorage** route,
+  `ISteamRemoteStorage::EnumerateUserSubscribedFiles` — the one many games
+  use instead of `ISteamUGC`. Without it the answer came from real Steam,
+  which answers for the spoofed AppId (480/Spacewar) and therefore always
+  returned an empty list, so the game never learned that any mod existed.
+  The result is delivered asynchronously, the way Steam does it: a call
+  handle whose payload is a `RemoteStorageEnumerateUserSubscribedFilesResult_t`
+  (up to 50 entries per call, paged with `unStartIndex`).
 - The vtable hooks that implement the spoof. On Linux there is no MinHook:
   the hook shim patches the interface **vtable slots** in place, which is
   what the Steamworks C++ interfaces dispatch through anyway.

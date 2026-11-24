@@ -166,6 +166,67 @@ public:
         return false;
     }
 
+    // Copy the subscribed item ids (and their subscribe times) out of the
+    // on-disk table, starting at `startIndex`. Returns the total number of
+    // items known -- the caller needs both: the count it handed out and the
+    // count there is in total.
+    static uint32 FillSubscribed(uint32 startIndex, uint64* ids, uint32* times, uint32 cMax)
+    {
+        if (!s_bScanned) ScanContentDir();
+        const uint32 total = (uint32)s_Items.size();
+        if (!ids || !times || cMax == 0) return total;
+
+        uint32 n = 0;
+        for (uint32 i = startIndex; i < total && n < cMax; ++i, ++n)
+        {
+            ids[n] = s_Items[i].id;
+            times[n] = s_Items[i].timeUpdated;
+        }
+        return total;
+    }
+
+    // ISteamRemoteStorage::EnumerateUserSubscribedFiles asks the same
+    // question as ISteamUGC::GetSubscribedItems, but over the RemoteStorage
+    // interface -- and that is the route a lot of games take to find their
+    // mods. Under the AppId spoof real Steam answers with the SUBSCRIBED
+    // FILES OF THE SPOOFED APP (480/Spacewar), which is empty, so the game
+    // never learns that any mod exists.
+    //
+    // Answer it from the same on-disk table. The result is delivered the way
+    // Steam delivers it -- asynchronously, through a call handle whose payload
+    // is a RemoteStorageEnumerateUserSubscribedFilesResult_t. UcoCloudEmu owns
+    // that machinery (the same scheme the inventory emu uses).
+    static SteamAPICall_t EnumerateUserSubscribedFiles(uint32 unStartIndex)
+    {
+        if (!s_bEnabled) return 0;
+
+        RemoteStorageEnumerateUserSubscribedFilesResult_t res{};
+        res.m_eResult = k_EResultOK;
+
+        uint64 ids[k_unEnumeratePublishedFilesMaxResults] = { 0 };
+        uint32 times[k_unEnumeratePublishedFilesMaxResults] = { 0 };
+        const uint32 total = FillSubscribed(unStartIndex, ids, times,
+            k_unEnumeratePublishedFilesMaxResults);
+
+        const uint32 available = (total > unStartIndex) ? (total - unStartIndex) : 0;
+        const uint32 n = (available < k_unEnumeratePublishedFilesMaxResults)
+                       ? available : k_unEnumeratePublishedFilesMaxResults;
+        for (uint32 i = 0; i < n; ++i)
+        {
+            res.m_rgPublishedFileId[i] = ids[i];
+            res.m_rgRTimeSubscribed[i] = times[i];
+        }
+        res.m_nResultsReturned  = (int32)n;
+        res.m_nTotalResultCount = (int32)total;
+
+        UCOLOG("[UCOnline2] ISteamRemoteStorage::EnumerateUserSubscribedFiles(start=%u) -> %u item(s) of %u [emulated from disk]",
+            unStartIndex, n, total);
+
+        return UcoCloudEmu::PostCallResult(
+            RemoteStorageEnumerateUserSubscribedFilesResult_t::k_iCallback,
+            &res, sizeof(res));
+    }
+
 private:
     // Lightweight ACF parser -- only extracts WorkshopItemsInstalled entries
     struct AcfItemInfo
