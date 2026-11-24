@@ -48,7 +48,6 @@ static std::atomic<bool>  s_armed{ false };
 // can't fault the host. No objects with destructors here, so __try is legal.
 static uint8_t* FindSig(uint8_t* base, size_t range, const Sig& sig)
 {
-#if defined(_MSC_VER)
     __try
     {
         if (range < sig.len)
@@ -68,37 +67,6 @@ static uint8_t* FindSig(uint8_t* base, size_t range, const Sig& sig)
         return nullptr;
     }
     return nullptr;
-#else
-    // GCC has no MSVC-style __try/__except.  The scan runs over a loaded
-    // module, so its pages are mapped; a range that runs past the end of
-    // the mapping is cut off instead of being read (and faulting).
-    if (range < sig.len)
-        return nullptr;
-
-    uint8_t* end = base + range - sig.len;
-    MEMORY_BASIC_INFORMATION mbi;
-    if (VirtualQuery(base, &mbi, sizeof(mbi)) && mbi.State == MEM_COMMIT &&
-        !(mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)))
-    {
-        const uintptr_t regionEnd = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
-        if ((uintptr_t)end >= regionEnd)
-        {
-            if (regionEnd <= (uintptr_t)base + sig.len)
-                return nullptr;
-            end = (uint8_t*)(regionEnd - sig.len);
-        }
-    }
-
-    for (uint8_t* p = base; p <= end; ++p)
-    {
-        bool match = true;
-        for (size_t i = 0; i < sig.len; ++i)
-            if (p[i] != sig.bytes[i]) { match = false; break; }
-        if (match)
-            return p;
-    }
-    return nullptr;
-#endif
 }
 
 static bool ApplyPatch(uint8_t* site, const Sig& sig)
@@ -124,13 +92,7 @@ static DWORD WINAPI Hook(void)
 
     if (!s_armed.load(std::memory_order_acquire))
     {
-        uint8_t* ret = reinterpret_cast<uint8_t*>(
-#if defined(_MSC_VER)
-            _ReturnAddress()
-#else
-            __builtin_return_address(0)
-#endif
-        );
+        uint8_t* ret = reinterpret_cast<uint8_t*>(_ReturnAddress());
         for (const auto& sig : kSigs)
         {
             uint8_t* site = FindSig(ret, 128, sig);

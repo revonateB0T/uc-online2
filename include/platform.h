@@ -37,11 +37,8 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
-// Lower case: MSVC is happy with either, but the MinGW headers are
-// case sensitive and only ship "windows.h".
-#include <windows.h>
-#include <shlwapi.h>
-#include <string>
+#include <Windows.h>
+#include <Shlwapi.h>
 
 #define PLAT_IS_WINDOWS 1
 
@@ -54,39 +51,6 @@
 // The overlay proxy (version.dll / winmm.dll) and the DbgHelp minidump
 // writer are Windows-only; both are compiled out elsewhere.
 #define PLAT_HAS_OVERLAY_PROXY 1
-
-// The path of the module that owns `addr`, or the running executable when
-// addr is null.  The Windows twin of the POSIX helper further down.
-inline std::string PlatModulePathOf(void* addr)
-{
-    HMODULE mod = nullptr;
-    if (addr)
-    {
-        GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-                           GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-            (LPCSTR)addr, &mod);
-    }
-    else
-    {
-        mod = GetModuleHandleA(nullptr);
-    }
-
-    char buf[MAX_PATH] = { 0 };
-    if (mod && GetModuleFileNameA(mod, buf, MAX_PATH))
-        return std::string(buf);
-    return std::string();
-}
-
-// The absolute, symlink-resolved form of a path.  GetFullPathNameA does not
-// resolve symlinks, but it is what Windows has; the POSIX side uses
-// realpath().
-inline char* PlatRealPath(const char* path, char* out, size_t outLen)
-{
-    if (!path || !out || outLen == 0) return nullptr;
-    DWORD n = GetFullPathNameA(path, (DWORD)outLen, out, nullptr);
-    if (n == 0 || n >= outLen) return nullptr;
-    return out;
-}
 
 #else
 
@@ -412,14 +376,6 @@ inline std::string PlatExeDir()
     std::string p = PlatModulePathOf(nullptr);
     const size_t slash = p.rfind(PLAT_SEP);
     return (slash == std::string::npos) ? std::string() : p.substr(0, slash);
-}
-
-// The absolute, symlink-resolved form of a path (the POSIX twin of the
-// Windows helper above).
-inline char* PlatRealPath(const char* path, char* out, size_t outLen)
-{
-    if (!path || !out || outLen == 0) return nullptr;
-    return realpath(path, out);
 }
 
 // ------------------------------------------------------------

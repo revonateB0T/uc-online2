@@ -342,7 +342,7 @@ S_API const char* S_CALLTYPE SteamRealPath(const char* path)
 	}
 
 	char resolved[MAX_PATH] = { 0 };
-	if (PlatRealPath(path, resolved, sizeof(resolved)))
+	if (realpath(path, resolved))
 	{
 		snprintf(s_buf, MAX_PATH, "%s", resolved);
 		return s_buf;
