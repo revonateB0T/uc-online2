@@ -124,7 +124,9 @@ public:
 			return k_uAPICallInvalid;
 		}
 		s_EncryptedTicket.resize(ticketSize);
-		UCOLOG("[UCOnline2] RequestEncryptedAppTicket -> generated encrypted app ticket size=%u (cbDataToInclude=%d)", ticketSize, cbDataToInclude);
+		UCOLOG("[UCOnline2] RequestEncryptedAppTicket -> generated encrypted app ticket size=%u (cbDataToInclude=%d) "
+               "[emulated for appid %u; the signature is NOT Valve's, so a server that validates it with Steam rejects it]",
+            ticketSize, cbDataToInclude, s_unEmulatedAppId);
 		// Hex-dump first bytes for debugging
 		{
 			const uint32_t show = ticketSize > 128 ? 128u : ticketSize;

@@ -821,7 +821,14 @@ S_API SteamAPICall_t S_CALLTYPE SteamAPI_ISteamUser_RequestEncryptedAppTicket(in
 {
 	if (g_bClientReady == false)
 		__debugbreak();
-	UCOLOG("[UCOnline2] FLAT -> SteamAPI_ISteamUser_RequestEncryptedAppTicket cbDataToInclude=%d", cbDataToInclude);
+	// The ticket is minted by real Steam, but for the SESSION's AppId -- not
+	// for ogAppId. A server that checks which game the ticket belongs to
+	// (mod.io does, for Space Engineers) will see the forced AppId and
+	// refuse it. Say so here: it is the difference between "the ticket is
+	// invalid" and "the ticket belongs to another game".
+	UCOLOG("[UCOnline2] FLAT -> SteamAPI_ISteamUser_RequestEncryptedAppTicket cbDataToInclude=%d "
+	       "[genuine Steam ticket, but for the session AppId %u -- not ogAppId %u]",
+		cbDataToInclude, g_ForcedAppId, g_OriginalAppId);
 	return g_ClientCtx.SteamUser()->RequestEncryptedAppTicket(pDataToInclude, cbDataToInclude);
 }
 S_API bool S_CALLTYPE SteamAPI_ISteamUser_GetEncryptedAppTicket(intptr_t instancePtr, void * pTicket, int cbMaxTicket, uint32 * pcbTicket)

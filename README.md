@@ -592,6 +592,38 @@ to a machine you do not control, the answer is no.
 Steam lobbies plus P2P, or where the host itself validates the joining player, are
 the normal case and are what this project is for.
 
+**Encrypted app tickets and third-party services (mod.io and friends).** A
+service like mod.io authenticates the player with an *encrypted app ticket*:
+the game asks Steam for one, sends it to the service, and the service has Steam
+validate it. Two things are bound into that ticket — the Steam account and the
+**AppId the ticket was minted for** — and the AppId is the one the Steam session
+runs as, which here is the forced (free) AppId, not the game's own. The service
+compares it against the game it has registered, sees a mismatch and refuses.
+Measured on a live Steam client:
+
+| `AppId` in the ini | what Steam does |
+|---|---|
+| `480` (the free app) | mints a genuine, Valve-signed ticket — for app 480 |
+| the game's own AppId | refuses the session outright (`Failed to connect/create user`) when the account does not own the game |
+
+So the ticket can be genuine but still belong to the wrong game, and a session
+under the game's own AppId only exists if the account owns the game (or borrows
+it through Family Sharing). Nothing on the client side can produce a ticket that
+belongs to an app the account cannot run — the signature is Valve's.
+
+If the account *does* own the game, run the session under its real AppId
+(`AppId=<game id>` in `union-crax.ini`, no `ogAppId`) and the ticket, the
+Workshop and the cloud all become genuine; the emulator is then only there for
+whatever else it is needed for. If it does not, the only route left is to place
+the mods by hand (`%APPDATA%/SpaceEngineers/Mods/<numeric mod id>.zip`).
+
+The log tells you which of the two you are looking at:
+
+```
+[UCOnline2] FLAT -> SteamAPI_ISteamUser_RequestEncryptedAppTicket ... [genuine Steam ticket, but for the session AppId 480 -- not ogAppId 244850]
+[UCOnline2] RequestEncryptedAppTicket -> generated encrypted app ticket ... [emulated for appid 244850; the signature is NOT Valve's, ...]
+```
+
 ---
 
 ## Building
