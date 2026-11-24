@@ -692,18 +692,29 @@ ships the UI for it — the localized string `ModIO_EnterCode` reads *"输入收
 中收到的安全号码"* ("enter the security number you received in your inbox"), and
 the consent screen says *"将为您创建一个 mod.io 帐户"* ("a mod.io account will be
 created for you"). Signing in with an email address therefore does **not** need
-a Steam ticket at all, and is the clean way to get a mod.io session for a game
-you do not own. Try that first.
+a Steam ticket at all.
 
-**If the email path is not what you want**, `tools/modio_proxy.py` sits in front
-of `g-264.modapi.io` only, forwards everything untouched, and replaces the
-answer of the external-auth endpoints with a token you already have:
+In this build that button is not wired up — `MyWorkshopAuthenticate.Start` has
+no caller — but the two requests it would make are in the assembly, and
+`tools/modio_login.py` performs them with the game's own api key:
+
+```sh
+python3 tools/modio_login.py request you@example.com   # mod.io mails a code
+python3 tools/modio_login.py exchange 12345             # -> ~/.uc-online2-modio/token.json
+```
+
+(mod.io refuses disposable addresses, so use a real mailbox.) If you already
+signed in on the mod.io website, take the bearer token from your browser
+session instead — the website hands out the same kind of token.
+
+**Feeding the token to the game.** `tools/modio_proxy.py` sits in front of
+`g-264.modapi.io` only, forwards everything untouched, and replaces the answer
+of the external-auth endpoints with the token you have:
 
 ```sh
 python3 tools/modio_proxy.py init            # CA + server certificate
 python3 tools/modio_proxy.py cert install    # trust the CA (Proton prefix + system store)
 python3 tools/modio_proxy.py hosts add       # 127.0.0.1 g-264.modapi.io
-printf '{"access_token":"…"}' > ~/.uc-online2-modio/token.json
 python3 tools/modio_proxy.py serve           # needs root for port 443
 ```
 
