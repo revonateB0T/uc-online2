@@ -707,12 +707,9 @@ python3 tools/modio_login.py exchange 12345             # -> ~/.uc-online2-modio
 signed in on the mod.io website, take the bearer token from your browser
 session instead — the website hands out the same kind of token.
 
-**Feeding the token to the game.** Two ways, no proxy required for the second:
-
-*Embed it into the game.* `tools/modio_patch` (Mono.Cecil) replaces the body of
-`MyModIo.AuthenticateWithTicket()` — the method that turns the Steam ticket
-into an access token — with one that uses your token directly. The game then
-talks to mod.io as that token and never looks at the ticket again:
+**Feeding the token to the game.** `tools/modio_patch` (Mono.Cecil) replaces the
+body of `MyModIo.AuthenticateWithTicket()` — the method that turns the Steam
+ticket into an access token — with one that uses your token directly:
 
 ```sh
 cd tools/modio_patch
@@ -721,13 +718,18 @@ dotnet run -c Release -- --dll "/path/to/Space Engineers/Bin64/VRage.Mod.Io.dll"
     --search-dir "/path/to/Space Engineers/Bin64"
 ```
 
-The original assembly is kept as `VRage.Mod.Io.dll.orig` and the patch is
-always applied to that original, so it can be re-run when the token was
+That one method is enough for *everything*: the game puts the token it holds in
+`m_authenticatedToken`, and every API call afterwards adds it as
+`Authorization: Bearer …` — listing mods, downloading, ratings — so the whole
+mod.io side of the game runs as that account and never looks at the ticket
+again. The original assembly is kept as `VRage.Mod.Io.dll.orig` and the patch
+is always applied to that original, so it can be re-run when the token was
 renewed; `--restore` puts the original back.
 
-*Or let the proxy do it.* `tools/modio_proxy.py` sits in front of
-`g-264.modapi.io` only, forwards everything untouched, and replaces the answer
-of the external-auth endpoints with the token you have:
+*Without touching the game*, `tools/modio_proxy.py` sits in front of
+`g-264.modapi.io` only, forwards everything untouched, adds the token to every
+API call that does not have one, and replaces the answer of the external-auth
+endpoints with the token you have:
 
 ```sh
 python3 tools/modio_proxy.py init            # CA + server certificate

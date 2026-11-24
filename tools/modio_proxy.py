@@ -206,7 +206,7 @@ def cmd_hosts(args):
     lines = [l for l in body.splitlines() if HOSTS_MARKER not in l]
 
     if args.action == "add":
-        for host in [DEFAULT_HOST] + args.alias:
+        for host in [DEFAULT_HOST] + DEFAULT_SANS + list(args.alias):
             lines.append("127.0.0.1 %s %s" % (host, HOSTS_MARKER))
     elif args.action == "remove":
         lines = [l for l in lines if not (l.strip().startswith("127.0.0.1") and
@@ -257,9 +257,25 @@ class ProxyHandler(BaseHTTPRequestHandler):
     logfile = None
     token_file = None
     rules = []
+    token_cache = None
+    allowed_hosts = list(DEFAULT_SANS)
 
     def log_message(self, fmt, *a):  # silence the default stderr spam
         pass
+
+    def _upstream_for(self, path):
+        """Forward to the host the client asked for, but only hosts we know."""
+        host = (self.headers.get("Host") or "").split(":")[0].lower()
+        if host in self.allowed_hosts:
+            return host
+        return self.upstream
+
+    def _token(self):
+        """The access token, read once and then kept in memory."""
+        if self.token_cache is None:
+            token, _, _ = load_token(self.token_file)
+            self.token_cache = token
+        return self.token_cache
 
     def _read_body(self):
         length = self.headers.get("Content-Length")
@@ -285,13 +301,24 @@ class ProxyHandler(BaseHTTPRequestHandler):
             if key.lower() in HOP_BY_HOP:
                 continue
             headers[key] = value
-        headers["Host"] = self.upstream
+        upstream = self._upstream_for(path)
+        headers["Host"] = upstream
         headers["Accept-Encoding"] = "identity"
         headers["Connection"] = "close"
 
+        # Every API call the game makes is authenticated with our token, not
+        # only the exchange.  That way it does not matter whether the game's
+        # own login attempt succeeded.
+        token = self._token()
+        if token and not any(k.lower() == "authorization" for k in headers):
+            if path.startswith("/v1/") and not any(ep in path for ep in AUTH_ENDPOINTS):
+                headers["Authorization"] = "Bearer " + token
+                log_line(self.logfile, "** added our Authorization header to %s %s" %
+                         (method, path))
+
         conn = None
         try:
-            conn = http.client.HTTPSConnection(self.upstream, 443, timeout=UPSTREAM_TIMEOUT)
+            conn = http.client.HTTPSConnection(upstream, 443, timeout=UPSTREAM_TIMEOUT)
             conn.request(method, path, body=body or None, headers=headers)
             resp = conn.getresponse()
             data = resp.read()
@@ -301,7 +328,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             log_line(self.logfile, "<- %s %s -> HTTP %d (%d bytes)" %
                      (method, path, status, len(data)))
         except Exception as exc:  # noqa: BLE001 - report and answer 502
-            log_line(self.logfile, "!! upstream %s failed: %s" % (self.upstream, exc))
+            log_line(self.logfile, "!! upstream %s failed: %s" % (upstream, exc))
             self.send_error(502, "upstream failed: %s" % exc)
             return
         finally:
