@@ -2452,6 +2452,12 @@ void InstallSteamSpoofHooks()
     if (UcoWorkshopEmu::Enabled() && g_ClientCtx.SteamUGC())
         UcoInstallWorkshopHooks(g_ClientCtx.SteamUGC());
 
+    // The workshop query names the app the game thinks it is; the real
+    // client only accepts its own. Installed unconditionally -- without it
+    // the game cannot create a query and waits for a result forever.
+    if (g_ClientCtx.SteamUGC())
+        UcoInstallUGCAppIdHooks(g_ClientCtx.SteamUGC());
+
     // ISteamUser auth hooks are installed per-interface, not here -- see
     // UcoInstallUserAuthHooks. The game frequently uses a DIFFERENT interface
     // version than the one we hold, and each version is a separate object with

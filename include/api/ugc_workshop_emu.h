@@ -32,6 +32,7 @@
 
 #include "../platform.h"
 #include "../hook_shim.h"
+#include "../globals.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -634,6 +635,105 @@ static bool S_CALLTYPE Hooked_GetItemInstallInfo(void* pThis, uint64 nPublishedF
 // Windows patches the function body (MinHook), Linux patches the vtable
 // slot -- see hook_shim.h. Either way the game ends up calling the detour
 // above.
+// ============================================================
+// The app id in a workshop query
+//
+// The game asks for the workshop of the app it thinks it is -- and we
+// tell it that is ogAppId (244850). But the real client runs as the
+// spoofed app id (480/Spacewar), and it refuses a query whose consumer
+// app id is not its own: CreateQueryUserUGCRequest comes back with an
+// invalid handle, the game sends that handle, and there is no call and
+// no result -- a wait that never ends.
+//
+// So the ids are translated on the way out. The consumer becomes the
+// client's own app id, and "the app this client runs as" (invalid)
+// becomes the game-facing one, so the query still asks Steam about the
+// workshop of the real game.
+//
+// ISteamUGC vtable indices (STEAMUGC_INTERFACE_VERSION021):
+//    0: CreateQueryUserUGCRequest
+//    1: CreateQueryAllUGCRequest
+// ============================================================
+
+typedef uint64 (S_CALLTYPE *Fn_CreateQueryUser)(void* pThis, uint32 unAccountID, int eListType,
+    int eMatchingUGCType, int eSortOrder, uint32 nCreatorAppID, uint32 nConsumerAppID, uint32 unPage);
+typedef uint64 (S_CALLTYPE *Fn_CreateQueryAll)(void* pThis, int eQueryType,
+    int eMatchingUGCType, uint32 nCreatorAppID, uint32 nConsumerAppID, uint32 unPage);
+
+static Fn_CreateQueryUser g_pfnOriginalCreateQueryUser = nullptr;
+static Fn_CreateQueryAll  g_pfnOriginalCreateQueryAll  = nullptr;
+
+// The consumer app id has to be the one the client runs as.
+static uint32 UcoTranslateConsumerAppId(uint32 nConsumerAppID)
+{
+    if (g_OriginalAppId && nConsumerAppID == g_OriginalAppId)
+        return g_ForcedAppId;
+    return nConsumerAppID;
+}
+
+// "Invalid" means "the app this client runs as" -- the spoofed one.
+// Name the real game instead.
+static uint32 UcoTranslateCreatorAppId(uint32 nCreatorAppID)
+{
+    if (nCreatorAppID == 0 && g_OriginalAppId)
+        return g_OriginalAppId;
+    return nCreatorAppID;
+}
+
+static uint64 S_CALLTYPE Hooked_CreateQueryUserUGCRequest(void* pThis, uint32 unAccountID,
+    int eListType, int eMatchingUGCType, int eSortOrder, uint32 nCreatorAppID,
+    uint32 nConsumerAppID, uint32 unPage)
+{
+    const uint32 creator = UcoTranslateCreatorAppId(nCreatorAppID);
+    const uint32 consumer = UcoTranslateConsumerAppId(nConsumerAppID);
+    if (creator != nCreatorAppID || consumer != nConsumerAppID)
+        UCOLOG("[UCOnline2] ISteamUGC::CreateQueryUserUGCRequest: creator %u->%u, consumer %u->%u",
+            nCreatorAppID, creator, nConsumerAppID, consumer);
+    return g_pfnOriginalCreateQueryUser(pThis, unAccountID, eListType, eMatchingUGCType,
+        eSortOrder, creator, consumer, unPage);
+}
+
+static uint64 S_CALLTYPE Hooked_CreateQueryAllUGCRequest(void* pThis, int eQueryType,
+    int eMatchingUGCType, uint32 nCreatorAppID, uint32 nConsumerAppID, uint32 unPage)
+{
+    const uint32 creator = UcoTranslateCreatorAppId(nCreatorAppID);
+    const uint32 consumer = UcoTranslateConsumerAppId(nConsumerAppID);
+    if (creator != nCreatorAppID || consumer != nConsumerAppID)
+        UCOLOG("[UCOnline2] ISteamUGC::CreateQueryAllUGCRequest: creator %u->%u, consumer %u->%u",
+            nCreatorAppID, creator, nConsumerAppID, consumer);
+    return g_pfnOriginalCreateQueryAll(pThis, eQueryType, eMatchingUGCType,
+        creator, consumer, unPage);
+}
+
+// Installed unconditionally: without it the game cannot even create a
+// query, so it waits for a result of a call that was never made.
+static void UcoInstallUGCAppIdHooks(ISteamUGC* pUGC)
+{
+    if (!pUGC) return;
+
+    void** ugcVT = *reinterpret_cast<void***>(pUGC);
+
+    struct UgcHook { int index; void* detour; void** original; const char* name; };
+    const UgcHook hooks[] = {
+        { 0, (void*)&Hooked_CreateQueryUserUGCRequest, (void**)&g_pfnOriginalCreateQueryUser, "CreateQueryUserUGCRequest" },
+        { 1, (void*)&Hooked_CreateQueryAllUGCRequest,  (void**)&g_pfnOriginalCreateQueryAll,  "CreateQueryAllUGCRequest" },
+    };
+
+    int installed = 0;
+    for (const UgcHook& h : hooks)
+    {
+        const PlatHookStatus st = PlatHookVTableMethod(ugcVT, h.index, h.detour, h.original);
+        if (st == PLAT_HOOK_OK || st == PLAT_HOOK_ALREADY)
+            ++installed;
+        else
+            UCOLOG("[UCOnline2] failed to hook ISteamUGC::%s (vtable[%d]): %d",
+                h.name, h.index, (int)st);
+    }
+
+    UCOLOG("[UCOnline2] ISteamUGC app id hooks: %d/%d installed (game app %u, client app %u)",
+        installed, (int)(sizeof(hooks) / sizeof(hooks[0])), g_OriginalAppId, g_ForcedAppId);
+}
+
 static void UcoInstallWorkshopHooks(ISteamUGC* pUGC)
 {
     if (!pUGC) return;

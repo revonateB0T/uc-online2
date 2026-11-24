@@ -498,7 +498,26 @@ S_API ESteamAPIInitResult S_CALLTYPE SteamInternal_SteamAPI_Init(const char* psz
 			Steam_RegisterInterfaceFuncs(g_ClientModule);
 			LoadBreakpadSymbols(g_ClientModule);
 
-			g_pSteamClient->Set_SteamAPI_CCheckCallbackRegisteredInProcess(CountRegisteredCallbacks);
+#if PLATFORM_WINDOWS
+			{
+				// The Windows client asks the process, for every result that
+				// arrives, whether anything is registered for that callback id.
+				// The answer decides where the result goes: to a registered
+				// handler, or into the manual dispatch queue that
+				// Steam_BGetCallback hands out.
+				//
+				// The hook lives at vtable slot 34. Our SDK header is older than
+				// the client and puts it elsewhere, so it is addressed by
+				// number -- the same way the real steam_api64.dll does it.
+				//
+				// The Linux client has no such hook; it always puts results into
+				// the queue, so this is Windows only.
+				typedef void (S_CALLTYPE* Fn_SetCheckHook)(void* pThis, uint32 (*pfn)(int));
+				void** vt = *reinterpret_cast<void***>(g_pSteamClient);
+				Fn_SetCheckHook setCheckHook = (Fn_SetCheckHook)vt[34];
+				setCheckHook(g_pSteamClient, CountRegisteredCallbacks);
+			}
+#endif
 
 			ISteamUser* pUser = (ISteamUser*)g_pSteamClient->GetISteamUser(g_ClientUser, g_ClientPipe, STEAMUSER_INTERFACE_VERSION);
 			if (pUser)
