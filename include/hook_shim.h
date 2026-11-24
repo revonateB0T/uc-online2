@@ -49,6 +49,24 @@ enum PlatHookStatus
     PLAT_HOOK_UNSUPPORTED,
 };
 
+// Make sure MinHook is up before the first hook is created.
+//
+// MH_CreateHook fails with MH_ERROR_NOT_INITIALIZED (2) until MH_Initialize
+// has run, and every hook site goes through here -- so the initialization
+// lives here, in the one place all of them pass through. The Windows build
+// used to call MH_Initialize() by hand at each site; the Linux port dropped
+// those calls (there is no MinHook on Linux) and with them the Windows
+// build lost its initialization, so no hook was ever installed.
+//
+// Calling MH_Initialize() more than once is fine: MinHook answers
+// MH_ERROR_ALREADY_INITIALIZED and stays usable.
+inline void PlatHookEnsureInitialized()
+{
+    MH_STATUS st = MH_Initialize();
+    if (st != MH_OK && st != MH_ERROR_ALREADY_INITIALIZED)
+        UCOLOG("[UCOnline2] MH_Initialize failed: %d", (int)st);
+}
+
 // Hook the method at `index` of the vtable `vt`.
 //
 // The Windows build keeps MinHook's inline patch so the existing
@@ -59,6 +77,8 @@ inline PlatHookStatus PlatHookVTableMethod(void** vt, int index, void* detour, v
 
     void* target = vt[index];
     if (!target) return PLAT_HOOK_FAILED;
+
+    PlatHookEnsureInitialized();
 
     MH_STATUS st = MH_CreateHook(target, detour, original);
     if (st == MH_ERROR_ALREADY_CREATED)
@@ -85,6 +105,8 @@ inline PlatHookStatus PlatHookVTableMethod(void** vt, int index, void* detour, v
 inline PlatHookStatus PlatHookFunction(void* target, void* detour, void** original)
 {
     if (!target || !detour) return PLAT_HOOK_FAILED;
+
+    PlatHookEnsureInitialized();
 
     MH_STATUS st = MH_CreateHook(target, detour, original);
     if (st == MH_ERROR_ALREADY_CREATED) return PLAT_HOOK_ALREADY;
