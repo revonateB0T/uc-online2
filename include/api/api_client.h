@@ -315,6 +315,8 @@ S_API const char* S_CALLTYPE SteamAPI_GetSteamInstallPath()
 #endif // !_WIN32
 }
 
+#if !defined(_WIN32)
+
 // ============================================================
 // SteamRealPath -- Linux SDK only.
 //
@@ -327,6 +329,10 @@ S_API const char* S_CALLTYPE SteamAPI_GetSteamInstallPath()
 // The behaviour implemented here is the useful one: with a path, hand
 // back its absolute, symlink-resolved form; with no path, hand back the
 // directory this library was loaded from.
+//
+// The Windows build has no such export (the real steam_api64.dll does
+// not have it either), so this whole block is compiled out there --
+// along with its POSIX-only helpers, PlatModulePathOf and realpath.
 // ============================================================
 S_API const char* S_CALLTYPE SteamRealPath(const char* path)
 {
@@ -351,6 +357,8 @@ S_API const char* S_CALLTYPE SteamRealPath(const char* path)
 	snprintf(s_buf, MAX_PATH, "%s", path);
 	return s_buf;
 }
+
+#endif // !_WIN32
 
 S_API ESteamAPIInitResult S_CALLTYPE SteamInternal_SteamAPI_Init(const char* pszVersions, SteamErrMsg* pOutErr)
 {
