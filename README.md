@@ -624,6 +624,33 @@ The log tells you which of the two you are looking at:
 [UCOnline2] RequestEncryptedAppTicket -> generated encrypted app ticket ... [emulated for appid 244850; the signature is NOT Valve's, ...]
 ```
 
+**Testing whether the service really checks the AppId.** A ticket for *another*
+game cannot be used as-is — the publisher decrypts it with that game's own key
+— but the service's leniency can still be measured. Put an app the account
+**owns** in `AppId` and the real game in `ogAppId`:
+
+```ini
+[Settings]
+AppId=304930              # an app the account owns -- the session runs as this
+ogAppId=244850            # the game still believes it is 244850
+```
+
+The session is then established under the owned app, so Steam mints a genuine
+ticket — for the owned app — while `SteamAPI_GetAppID` keeps telling the game
+it is 244850. Measured on a live client:
+
+| `AppId` | session | ticket |
+|---|---|---|
+| `480` (free app) | yes | yes, for 480 |
+| `304930` (owned, installed) | yes | yes, for 304930 |
+| `387290`, `3167020` (owned, not installed) | yes | **no ticket** |
+| `244850` (not owned) | **no session** | — |
+
+If the service accepts that ticket, it only checks the account, and the mod
+list works. If it refuses, it checks the AppId, and there is nothing left to
+try. Note that ownership alone is not enough for a ticket: the app has to be
+installed as well.
+
 ---
 
 ## Building
