@@ -2204,7 +2204,7 @@ static void S_CALLTYPE Hooked_RS_SetCloudEnabledForApp(void*, bool) {}
 // empty list, so the game never finds its mods. The emulated item table
 // answers instead -- see UcoWorkshopEmu::EnumerateUserSubscribedFiles.
 static SteamAPICall_t S_CALLTYPE Hooked_RS_EnumerateUserSubscribedFiles(void*, uint32 unStartIndex)
-{ return UcoWorkshopEmu::EnumerateUserSubscribedFiles(unStartIndex); }
+{ return UcoWorkshopEmu::EnumerateUserSubscribedFiles(unStartIndex, "vtable hook"); }
 
 struct UcoRemoteStorageLayout
 {

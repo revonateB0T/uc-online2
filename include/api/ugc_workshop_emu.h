@@ -65,6 +65,31 @@ static inline void UcoCopyBounded(char* dst, size_t dstSize, const std::string& 
     dst[copy] = '\0';
 }
 
+// Call counters, so the log shows how often the game actually asks.
+static uint32 g_nCallsGetNumSubscribedItems = 0;
+static uint32 g_nCallsGetSubscribedItems    = 0;
+static uint32 g_nCallsGetItemState          = 0;
+static uint32 g_nCallsGetItemInstallInfo    = 0;
+static uint32 g_nCallsEnumerateSubscribed   = 0;
+
+// Render a list of published file IDs for the log.
+static void UcoFormatIdList(char* buf, size_t bufSize, const uint64* ids, uint32 count)
+{
+    if (!buf || bufSize == 0) return;
+    buf[0] = '\0';
+
+    size_t used = 0;
+    for (uint32 i = 0; i < count && i < 16; ++i)
+    {
+        const int n = _snprintf_s(buf + used, bufSize - used, _TRUNCATE, "%s%llu",
+            (i ? " " : ""), (unsigned long long)ids[i]);
+        if (n < 0 || (size_t)n >= bufSize - used) { buf[used] = '\0'; return; }
+        used += (size_t)n;
+    }
+    if (count > 16)
+        _snprintf_s(buf + used, bufSize - used, _TRUNCATE, " ...");
+}
+
 class UcoWorkshopEmu
 {
 public:
@@ -196,9 +221,20 @@ public:
     // Steam delivers it -- asynchronously, through a call handle whose payload
     // is a RemoteStorageEnumerateUserSubscribedFilesResult_t. UcoCloudEmu owns
     // that machinery (the same scheme the inventory emu uses).
-    static SteamAPICall_t EnumerateUserSubscribedFiles(uint32 unStartIndex)
+    //
+    // `route` says which door the call came in through ("flat export" or
+    // "vtable hook"), so the log shows how the game reaches us.
+    static SteamAPICall_t EnumerateUserSubscribedFiles(uint32 unStartIndex,
+                                                        const char* route = "vtable hook")
     {
-        if (!s_bEnabled) return 0;
+        const uint32 call = ++g_nCallsEnumerateSubscribed;
+
+        if (!s_bEnabled)
+        {
+            UCOLOG("[UCOnline2] ISteamRemoteStorage::EnumerateUserSubscribedFiles(call#%u, start=%u, via %s) -> not emulated [no Workshop content]",
+                call, unStartIndex, route ? route : "?");
+            return 0;
+        }
 
         RemoteStorageEnumerateUserSubscribedFilesResult_t res{};
         res.m_eResult = k_EResultOK;
@@ -219,8 +255,11 @@ public:
         res.m_nResultsReturned  = (int32)n;
         res.m_nTotalResultCount = (int32)total;
 
-        UCOLOG("[UCOnline2] ISteamRemoteStorage::EnumerateUserSubscribedFiles(start=%u) -> %u item(s) of %u [emulated from disk]",
-            unStartIndex, n, total);
+        char idList[512] = { 0 };
+        UcoFormatIdList(idList, sizeof(idList), ids, n);
+
+        UCOLOG("[UCOnline2] ISteamRemoteStorage::EnumerateUserSubscribedFiles(call#%u, start=%u, via %s) -> %u item(s) of %u [%s] [emulated from disk]",
+            call, unStartIndex, route ? route : "?", n, total, idList);
 
         return UcoCloudEmu::PostCallResult(
             RemoteStorageEnumerateUserSubscribedFilesResult_t::k_iCallback,
@@ -509,29 +548,6 @@ static Fn_GetSubscribedItems     g_pfnOriginalGetSubscribedItems     = nullptr;
 static Fn_GetItemState           g_pfnOriginalGetItemState           = nullptr;
 static Fn_GetItemInstallInfo     g_pfnOriginalGetItemInstallInfo     = nullptr;
 
-// Call counters, so the log shows how often the game actually asks.
-static uint32 g_nCallsGetNumSubscribedItems = 0;
-static uint32 g_nCallsGetSubscribedItems    = 0;
-static uint32 g_nCallsGetItemState          = 0;
-static uint32 g_nCallsGetItemInstallInfo    = 0;
-
-// Render a list of published file IDs for the log.
-static void UcoFormatIdList(char* buf, size_t bufSize, const uint64* ids, uint32 count)
-{
-    if (!buf || bufSize == 0) return;
-    buf[0] = '\0';
-
-    size_t used = 0;
-    for (uint32 i = 0; i < count && i < 16; ++i)
-    {
-        const int n = _snprintf_s(buf + used, bufSize - used, _TRUNCATE, "%s%llu",
-            (i ? " " : ""), (unsigned long long)ids[i]);
-        if (n < 0 || (size_t)n >= bufSize - used) { buf[used] = '\0'; return; }
-        used += (size_t)n;
-    }
-    if (count > 16)
-        _snprintf_s(buf + used, bufSize - used, _TRUNCATE, " ...");
-}
 
 static uint32 S_CALLTYPE Hooked_GetNumSubscribedItems(void* pThis, bool bIncludeLocallyDisabled)
 {

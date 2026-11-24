@@ -2576,7 +2576,11 @@ S_API SteamAPICall_t S_CALLTYPE SteamAPI_ISteamRemoteStorage_EnumerateUserSubscr
 	// Steam answers for the spoofed AppId (480/Spacewar) and returns an
 	// empty list, so the game never finds its mods.
 	if (UcoWorkshopEmu::Enabled())
-		return UcoWorkshopEmu::EnumerateUserSubscribedFiles(unStartIndex);
+		return UcoWorkshopEmu::EnumerateUserSubscribedFiles(unStartIndex, "flat export");
+	// Nothing to emulate: let real Steam answer, and say so in the log --
+	// a game that calls this and gets an empty list should be visible.
+	UCOLOG("[UCOnline2] FLAT ISteamRemoteStorage::EnumerateUserSubscribedFiles(start=%u) -> real Steam [no Workshop emulation]",
+		unStartIndex);
 	return g_ClientCtx.SteamRemoteStorage()->EnumerateUserSubscribedFiles(unStartIndex);
 }
 S_API SteamAPICall_t S_CALLTYPE SteamAPI_ISteamRemoteStorage_UnsubscribePublishedFile(intptr_t instancePtr, PublishedFileId_t unPublishedFileId)
